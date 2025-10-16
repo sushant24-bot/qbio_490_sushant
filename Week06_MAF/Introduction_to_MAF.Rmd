@@ -1,0 +1,195 @@
+---
+title: "Introduction to MAF"
+author: Erika Li, Jeanne Revilla, Mahija Mogalipuvvu, adapted from Nicole Black, Wade Boohar
+date: 07/17/22
+updated: 9/29/2025
+---
+
+***Deliverables***
+- upload this R Notebook to your GitHub and submit the link to your Repo on Brightspace
+- include ALL graphs or figures created in this assignment in a folder with your R notebook with descriptive file names.
+
+We encourage you to work with a partner. Therefore, it is okay if your answers are the same as your partner’s as long as everyone understands it and could explain it in their own words if asked. Each person must individually push their code to Github. *At the top of your R Notebook, write the name of you and your partner(s) as a comment.*
+
+***Complete the following coding activity and answer any following questions as comments in your R Notebook***
+
+In this assignment, you will need to use your skills learned in class to demonstrate your understanding of categorical variables and R data structures.
+
+*Pre-Assignment*
+Load all necessary packages, read in the clinical data.csv file you have in your analysis_data folder, and instantiate the MAF_object.
+```{r}
+if (!require("knitr", quietly = TRUE))
+install.packages("knitr")
+if (!require("BiocManager", quietly = TRUE))
+install.packages("BiocManager")
+BiocManager::install(version = "3.21")
+if (!require("TCGAbiolinks", quietly = TRUE))
+BiocManager::install("TCGAbiolinks")
+if (!require("maftools", quietly = TRUE))
+BiocManager::install("maftools")
+library(BiocManager)
+library(TCGAbiolinks)
+library(maftools)
+
+maf_query <- GDCquery(
+project = "TCGA-BRCA",
+data.category = "Simple Nucleotide Variation",
+access = "open",
+data.type = "Masked Somatic Mutation",
+workflow.type = "Aliquot Ensemble Somatic Variant Merging and Masking"
+)
+GDCdownload(maf_query, method = "api", files.per.chunk = 100)
+maf <- GDCprepare(maf_query)
+maf_object <- read.maf(maf = maf,
+clinicalData = clinic,
+isTCGA = TRUE)
+```
+
+It's useful to save your MAF_object, so that you don't have to go through the trouble of querying and preparing it everytime. The saveRDS function allows us to save an R object, allowing us to access it directly from our files. 
+```{r}
+saveRDS(maf_object, file = "/path/to/analysis_data/maf_object.rds")
+# ex. saveRDS(MAF_object, file = "/home1/erika/490_cluster/analysis_data/maf_object.rds")
+```
+
+When you reopen a new R session and want to access your MAF_object, you can use the readRDS function to load the object back into a new variable.
+```{r}
+MAF_object <- readRDS(file = "/path/to/analysis_data/maf_object.rds")
+# ex. MAF_object <- readRDS(file = "/home1/erika/490_cluster/analysis_data/maf_object.rds")
+```
+
+*1*
+Choose a clinical variable (or any variable from clin_rad or clin_drug) to separate your populations into two different groups and rewrite the column or create a new column with that variable as a factor. ***Do not use age or vital_status as your clinical variable.*** Hint: if your variable is continuous, you will need to determine your own cutoffs for the different levels of the factor. If your variable is categorical and has more than two possible values, choose the two that are the most common.
+```{r}
+#maf_object@clinical.data$history_other_malignancy
+unique(maf_object@clinical.data$history_other_malignancy)
+maf_object@clinical.data$history_other_malignancy_clean <- maf_object@clinical.data$history_other_malignancy
+maf_object@clinical.data$history_other_malignancy_clean[
+  maf_object@clinical.data$history_other_malignancy_clean == "[Discrepancy]"
+] <- NA
+unique(maf_object@clinical.data$history_other_malignancy_clean)
+prev_mal_mask <- ifelse(maf_object@clinical.data$history_other_malignancy_clean == "Yes", TRUE, FALSE)
+prev_mal_barcode <- maf_object@clinical.data$Tumor_Sample_Barcode[prev_mal_mask]
+
+prev_mal_maf <- subsetMaf(maf = maf_object, tsb = prev_mal_barcode)
+
+no_prev_mal_mask <- ifelse(maf_object@clinical.data$history_other_malignancy_clean == "No", TRUE, FALSE)
+no_prev_mal_barcode <- maf_object@clinical.data$Tumor_Sample_Barcode[no_prev_mal_mask]
+
+no_prev_mal_maf <- subsetMaf(maf = maf_object, tsb = no_prev_mal_barcode)
+```
+
+
+*2*
+Create a co-oncoplot with the top 10-20 (you choose) most mutated genes for the two groups. Pick one that has a large discrepancy in % mutated or type of mutations between the groups and research it. 
+Research it. What is the gene used for? Can you think of any reason for the discrepancy?
+```{r}
+top_genes <- c("TP53", "CDH1", "MUC16", "KMT2C", "SYNE1", "FLG", "PTEN", "USH2A", "SPTA1", "NEB")
+coOncoplot(
+  m1 = prev_mal_maf,
+  m2 = no_prev_mal_maf,
+  m1Name = "History of Malignancy: Yes",
+  m2Name = "History of Malignancy: No",
+  genes = top_genes
+)
+
+```
+
+
+*3*
+Create a contingency table with your variable and chosen gene. Run a Fisher’s Exact Test between presence of mutations for that gene and your clinical variable. Create and save a mosaic plot. 
+Interpret the output of the Fisher’s Exact Test in terms of the odds ratio and p-value.
+```{r}
+gene <- "TP53"
+
+mut_yes <- unique(subsetMaf(prev_mal_maf, genes = gene)@data$Tumor_Sample_Barcode)
+mut_no  <- unique(subsetMaf(no_prev_mal_maf, genes = gene)@data$Tumor_Sample_Barcode)
+n_yes <- length(unique(prev_mal_maf@clinical.data$Tumor_Sample_Barcode))
+n_no  <- length(unique(no_prev_mal_maf@clinical.data$Tumor_Sample_Barcode))
+
+tbl <- matrix(c(
+  length(mut_yes),                 
+  n_yes - length(mut_yes),        
+  length(mut_no),                  
+  n_no - length(mut_no)           
+), 
+nrow = 2, byrow = TRUE)
+
+rownames(tbl) <- c("Mutated", "WT")
+colnames(tbl) <- c("Prev_Mal_Yes", "Prev_Mal_No")
+tbl
+
+fisher.test(tbl)
+
+mosaicplot(tbl,
+           main = paste(gene, "Mutation vs. Malignancy History"),
+           color = TRUE,
+           xlab = "History of Malignancy",
+           ylab = "Mutation Status")
+dev.off()
+
+#p-value means the data is not stastically significant. Odds ratio shows a lower odds of mutations, but still not statistically significicant.
+
+```
+
+
+*4*
+Subset your maf_object based on your chosen clinical variable and create a co-lollipop plot of your chosen gene divided between the two different clinical variable possibilities. Include descriptive names on your plot.
+Do you notice any difference in terms of mutations (e.g. sites, types, number) between the two populations?
+```{r}
+lollipopPlot2(m1 = prev_mal_maf, m2 = no_prev_mal_maf, gene = "TP53")
+```
+
+
+*5*
+Create your Overall_Survival_Status column and create a mafSurvival KM plot based on mutations in your chosen gene.
+Does there seem to be a difference? Hypothesize why or not based on the other analysis you did with the gene above.
+```{r}
+clinic <- maf_object@clinical.data
+survival_NA_mask <- !is.na(clinic$vital_status) & !is.na(clinic$last_contact_days_to)
+cleaned_clinic <- clinic[survival_NA_mask, ]
+cleaned_clinic$Overall_Survival_Status <- ifelse(cleaned_clinic$vital_status == "Dead", 1, 0)
+cleaned_clinic$Overall_Survival_Time <- ifelse(cleaned_clinic$death_days_to == "Not Applicable", cleaned_clinic$last_contact_days_to,
+                                               cleaned_clinic$death_days_to)
+cleaned_clinic$Overall_Survival_Time <- as.numeric(cleaned_clinic$Overall_Survival_Time)
+
+maf_object@clinical.data$Overall_Survival_Time <- cleaned_clinic$Overall_Survival_Time
+maf_object@clinical.data$Overall_Survival_Status <- cleaned_clinic$Overall_Survival_Status
+
+library(maftools)
+library(survival)
+library(survminer)
+
+gene <- "TP53"
+
+survival_object <- Surv(time = cleaned_clinic$Overall_Survival_Time,
+                        event = cleaned_clinic$Overall_Survival_Status)
+mafSurvival(
+  maf = maf_object,
+  genes = gene,
+  time = "Overall_Survival_Time",
+  Status = "Overall_Survival_Status",
+  isTCGA = FALSE
+)
+TP53_mutated_samples <- getSampleSummary(maf_object)
+TP53_mutated_samples <- maf_object@data[maf_object@data$Hugo_Symbol == "TP53", "Tumor_Sample_Barcode"]
+cleaned_clinic$TP53_status <- ifelse(cleaned_clinic$Tumor_Sample_Barcode %in% TP53_mutated_samples,
+                                     "Mutated", "Wild-Type")
+
+fit_object <- survfit(Surv(Overall_Survival_Time, Overall_Survival_Status) ~ TP53_status,
+                      data = cleaned_clinic)
+
+survplot <- ggsurvplot(fit_object,
+                       pval = TRUE,
+                       ggtheme = theme(plot.margin = unit(c(1,1,1,1), "cm")),
+                       legend = "right")
+
+KM_plot <- survplot$plot + theme_bw() +
+  theme(axis.title = element_text(size=20), 
+        axis.text = element_text(size=16),
+        legend.title = element_text(size=14),
+        legend.text = element_text(size=12))
+
+KM_plot
+# the results show that the mutation in the gene does have a change in the survival probability, but analyzing in conjunction withe the fisher plot from the previous prompt, shows that the data is not significant enough to draw a conclusion from. 
+
+```

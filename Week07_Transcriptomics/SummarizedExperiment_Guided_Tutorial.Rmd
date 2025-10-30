@@ -1,0 +1,300 @@
+---
+title: "SummarizedExperiment Tutorial"
+author: Wade Boohar, Kayla Xu, updated by Jeanne Revilla
+date: 09/24/23
+updated: 10/05/25
+---
+
+```{r setup}
+      knitr::opts_knit$set(root.dir = normalizePath("/home1/jrevilla/490_cluster/analysis_data")) 
+```
+
+
+```{r Package Setup}
+# install, only if needed, and load packages (SummarizedExperiment and TCGAbiolinks)
+if (!require("SummarizedExperiment", quietly = TRUE))
+  BiocManager::install("SummarizedExperiment")
+
+library(TCGAbiolinks)
+library(SummarizedExperiment)
+```
+
+Load in the RNAseq data
+```{r}
+rna_query <- GDCquery(project ="TCGA-BRCA",
+                      data.category = "Transcriptome Profiling",
+                      data.type = "Gene Expression Quantification",
+                      workflow.type = "STAR - Counts")
+
+rna_se <- GDCprepare(rna_query)
+```
+
+
+###### (1) Summarized Experiment Basics
+
+Let's take a look at rna_se (RNA Summarized Experiment). Call head() and str(). Also explore the data frame by double clicking on it from the Environment panel (or calling "View(rna_se)").
+
+```{r Exercise 1.1}
+# write code here
+head(rna_se)
+str(rna_se)
+```
+
+Use the dim() function to find the dimensions of the colData, rowRanges@elementMetadata, and unstranded dataframes. Record them below:
+
+  ~ colData (rows, cols): 1231, 98
+  ~ rowRanges@elementMetadata: 60660, 10
+  ~ rna_se@assays@data$unstranded: 60660, 1231
+
+```{r Exercise 1.2}
+# write code here
+dim(rna_se@colData)
+dim(rna_se@rowRanges@elementMetadata)
+dim(rna_se@assays@data$unstranded)
+
+```
+
+Fill out a description of the rows/columns of our data frames. You can use this as a cheat sheet moving forward.
+  ~ colData
+        - Rows: patients
+        - Columns: clinical variables
+  ~ rowRanges@elementMetadata
+        - Rows: genes
+        - Columns: gene info
+  ~ unstranded (in assays)
+        - Rows: genes
+        - Columns: patients
+  
+```{r Exercise 1.3}
+# colData: 
+rownames(rna_se@colData)
+colnames(rna_se@colData)
+
+# rowRanges:
+rownames(rna_se@rowRanges@elementMetadata)
+colnames(rna_se@rowRanges@elementMetadata)
+
+# what are the rows...?
+
+# unstranded: 
+# Hint: Do the rows/cols match dimensions of other dataframes?
+
+```
+
+###### (2) ColData
+
+Using the nested dataframe colData in rna_se, view the first 15 values in the age_at_index column.
+
+```{r Exercise 2.1}
+# write code here
+rna_se@colData$age_at_index[1:15]
+
+```
+
+Call summary on the age_at_index column. Record the output below:
+    Min.: 
+    1st Qu.: 
+    Median: 
+    Mean: 
+    3rd Qu.: 
+    Max.: 
+    NA's: 
+    
+```{r Exercise 2.2}
+# write code here
+summary(rna_se@colData$age_at_index)
+```
+
+Create a data frame called rna_clinical that contains data from colData.
+
+```{r Exercise 2.3}
+rna_clinical <- rna_se@colData
+
+```
+
+Use the as.data.frame() function to change this from an S4 object to a data frame object.
+
+```{r Exercise 2.4}
+
+rna_clinical <- as.data.frame(rna_clinical)
+
+```
+
+Four columns in rna_clinical contain nested lists. To save the dataframe as a csv later, we need to first remove those columns. Using boolean masks, subset out treatments, primary_site, disease_type, and sites_of_involvement
+
+```{r Exercise 2.5}
+
+colnames_mask <- !(colnames(rna_clinical) %in% c("treatments", "primary_site", "disease_type", 
+                                                  "sites_of_involvement"))
+#we are masking out COLUMNS here
+rna_clinical <- rna_clinical[,colnames_mask]
+
+```
+
+Remember that patient with an N/A value in age_at_index? Let's subset them out.
+```{r Exercise 2.6}
+age_NA_mask <- !is.na(rna_clinical$age_at_index)
+  
+rna_clinical <- rna_clinical[age_NA_mask,]  
+
+summary(rna_clinical$age_at_index)
+```
+
+
+###### (3) RowRanges
+
+Call head() on rowRanges@elementMetadata:
+
+```{r Exercise 3.1}
+# write code here
+head(rna_se@rowRanges@elementMetadata)
+
+```
+
+Create a data frame called rna_genes that contains data from elementMetadata.
+
+```{r Exercise 3.2}
+rna_genes <- rna_se@rowRanges@elementMetadata
+
+```
+
+Use the as.data.frame() function to change this from an S4 object to a data frame object
+
+```{r Exercise 3.3}
+rna_genes <- as.data.frame(rna_genes)
+
+```
+
+###### (4) Assays
+
+What are the names of the 6 assays?
+
+```{r Exercise 4.1}
+# access the assays here
+rna_se@assays@data
+
+```
+
+Create a new data frame called "rna_counts" that contains the data from unstranded. Recall the patient with NA age data? We need to exclude that patient. We can use the same mask to do this.
+
+```{r Exercise 4.2}
+
+rna_counts <- rna_se@assays@data$unstranded
+rna_counts <- as.data.frame(rna_counts)
+
+rna_counts <- rna_counts[,age_NA_mask]
+
+```
+
+Fetch the data for the first 5 patients and the first 15 rows.
+
+```{r Exercise 4.3}
+rna_counts[1:15, 1:5]
+
+```
+
+
+###### (5) Cleaning up your data frames
+
+Call rownames() and colnames() on rna_clinical.
+
+```{r Exercise 5.1}
+
+
+```
+
+Just like we did to "clinical", we are going to create a column in rna_clinical for age_category. Our cutoff will be "young" as <= 58 y/o, and "old" as > 58 y/o.
+
+There are three age columns in rna_clinical. We'll use the column age_at_index, because it has the fewest number of NA values (only 1).
+
+Age columns:
+  rna_clinical$age_at_diagnosis (16 NAs) (in days, not years)
+  rna_clinical$age_at_index (1 NA) 
+  rna_clinical$paper_age_at_initial_pathologic_diagnosis (19 NAs)
+  
+
+Use the information in age_at_index with an ifelse() statement to create a new column in rna_clinical called age_category. Remember ifelse(expression, x, y), where x happens if the expression is true, and y happens if it is false.
+
+
+Just like we did to "clinical", we are going to create a column in rna_clinical for age_category. Our cutoff will be "young" as <= 58 y/o, and "old" as > 58 y/o.
+
+```{r Exercise 5.4}
+rna_clinical$age_category <- ifelse(rna_clinical$age_at_index <= 58, "young", "old")
+
+```
+
+----
+
+Let's move on to rna_genes. Call rownames() and colnames() on rna_genes.
+
+```{r Exercise 5.5}
+
+rownames(rna_genes)
+colnames(rna_genes)
+
+```
+
+Oh no! These row names don't look very informative. We know that the rows in rna_genes symbolize genes, so what should we change rownames() to? Which is better, gene_name or gene_id?
+
+```{r Exercise 5.6}
+
+rownames(rna_genes) <- rna_genes$gene_id
+
+```
+
+----
+
+Now that rna_genes has informative row/column names, let's move on to rna_counts. Call rownames() and colnames() on rna_counts.
+
+```{r Exercise 5.7}
+
+rownames(rna_counts)
+colnames(rna_counts)
+
+```
+
+Uh oh! Looks like neither the row nor column names are very informative. Given what we did to the other data frames, add column and row names to rna_counts. Name the columns based on the patient barcodes (ie the row names for rna_clinical), and name the rows based on the gene id's (ie the row names for rna_genes).
+
+```{r Exercise 5.8}
+
+rownames(rna_counts) <- rna_genes$gene_id
+colnames(rna_counts) <- rownames(rna_clinical)
+
+```
+
+Now, if we look at the data, we'll see the row names set as the gene IDs and the column names as the patient sample barcodes.
+```{r}
+
+rownames(rna_counts)
+colnames(rna_counts)
+
+```
+
+----
+
+Great! Now all of our data frames are ready for exploration and analysis.
+
+  
+###### (6) Saving data as csv
+
+Loading data from TCGA can be time consuming. It's much faster to access csv files.
+
+Save rna_clinical to your local machine
+
+```{r Exercise 6.1}
+write.csv(rna_clinical, "brca_rna_clinical_data.csv", row.names = TRUE)
+```
+
+
+Save rna_genes to your local machine.
+
+```{r Exercise 6.2}
+write.csv(rna_genes, "brca_rna_gene_data.csv", row.names = FALSE)
+```
+
+
+Save rna_counts to your local machine (warning: this will likely take a while!)
+
+```{r Exercise 6.3}
+write.csv(rna_counts, "brca_rna_count_data.csv", row.names = TRUE)
+```
